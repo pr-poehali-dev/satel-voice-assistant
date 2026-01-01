@@ -24,75 +24,6 @@ const Index = () => {
   const [isListeningForWakeWord, setIsListeningForWakeWord] = useState(false);
   const recognitionRef = useRef<any>(null);
 
-  useEffect(() => {
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = true;
-      recognitionRef.current.interimResults = true;
-      recognitionRef.current.lang = 'ru-RU';
-
-      recognitionRef.current.onresult = (event: any) => {
-        const transcript = Array.from(event.results)
-          .map((result: any) => result[0])
-          .map((result) => result.transcript)
-          .join('');
-
-        setCurrentText(transcript);
-
-        if (event.results[event.results.length - 1].isFinal) {
-          if (!isActive && transcript.toLowerCase().includes('сатела')) {
-            setIsActive(true);
-            setSatelaState('listening');
-            toast.success('Сатела активирована');
-            speak('Слушаю вас');
-          } else if (isActive) {
-            processCommand(transcript);
-          }
-        }
-      };
-
-      recognitionRef.current.onerror = (event: any) => {
-        console.error('Speech recognition error', event.error);
-        if (event.error === 'no-speech') {
-          setSatelaState('idle');
-        }
-      };
-
-      recognitionRef.current.onend = () => {
-        if (isListeningForWakeWord) {
-          recognitionRef.current.start();
-        }
-      };
-    }
-
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-    };
-  }, [isActive, isListeningForWakeWord]);
-
-  const startListening = () => {
-    if (recognitionRef.current) {
-      setIsListeningForWakeWord(true);
-      recognitionRef.current.start();
-      toast.info('Микрофон включен. Скажите "Сатела" для активации');
-    } else {
-      toast.error('Голосовое управление не поддерживается в этом браузере');
-    }
-  };
-
-  const stopListening = () => {
-    if (recognitionRef.current) {
-      setIsListeningForWakeWord(false);
-      recognitionRef.current.stop();
-      setIsActive(false);
-      setSatelaState('idle');
-      setCurrentText('');
-    }
-  };
-
   const speak = (text: string) => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'ru-RU';
@@ -154,7 +85,10 @@ const Index = () => {
       category = 'system';
       setTimeout(() => {
         setIsActive(false);
-        stopListening();
+        setIsListeningForWakeWord(false);
+        if (recognitionRef.current) {
+          recognitionRef.current.stop();
+        }
       }, 2000);
     } else {
       response = 'Команда не распознана. Попробуйте сформулировать иначе';
@@ -180,6 +114,100 @@ const Index = () => {
         setSatelaState('listening');
       }, 2000);
     }, 1000);
+  };
+
+  useEffect(() => {
+    if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+      return;
+    }
+
+    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    recognitionRef.current = new SpeechRecognition();
+    recognitionRef.current.continuous = true;
+    recognitionRef.current.interimResults = true;
+    recognitionRef.current.lang = 'ru-RU';
+
+    recognitionRef.current.onresult = (event: any) => {
+      const transcript = Array.from(event.results)
+        .map((result: any) => result[0])
+        .map((result) => result.transcript)
+        .join('');
+
+      setCurrentText(transcript);
+
+      if (event.results[event.results.length - 1].isFinal) {
+        if (transcript.toLowerCase().includes('сатела')) {
+          setIsActive(true);
+          setSatelaState('listening');
+          toast.success('Сатела активирована');
+          speak('Слушаю вас');
+          const cleanCommand = transcript.toLowerCase().replace('сатела', '').trim();
+          if (cleanCommand) {
+            processCommand(cleanCommand);
+          }
+        } else {
+          setIsActive((prev) => {
+            if (prev) {
+              processCommand(transcript);
+            }
+            return prev;
+          });
+        }
+      }
+    };
+
+    recognitionRef.current.onerror = (event: any) => {
+      console.error('Speech recognition error', event.error);
+      if (event.error === 'no-speech') {
+        setSatelaState('idle');
+      } else if (event.error === 'not-allowed') {
+        toast.error('Доступ к микрофону запрещен. Разрешите доступ в настройках браузера');
+        setIsListeningForWakeWord(false);
+      }
+    };
+
+    recognitionRef.current.onend = () => {
+      setIsListeningForWakeWord((prev) => {
+        if (prev && recognitionRef.current) {
+          try {
+            recognitionRef.current.start();
+          } catch (e) {
+            console.error('Failed to restart recognition', e);
+          }
+        }
+        return prev;
+      });
+    };
+
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {
+          console.error('Error stopping recognition', e);
+        }
+      }
+    };
+  }, []);
+
+  const startListening = () => {
+    if (recognitionRef.current) {
+      setIsListeningForWakeWord(true);
+      recognitionRef.current.start();
+      toast.info('Микрофон включен. Скажите "Сатела" для активации');
+    } else {
+      toast.error('Голосовое управление не поддерживается в этом браузере');
+    }
+  };
+
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      setIsListeningForWakeWord(false);
+      recognitionRef.current.stop();
+      setIsActive(false);
+      setSatelaState('idle');
+      setCurrentText('');
+    }
   };
 
   const getCategoryIcon = (category: CommandType['category']) => {
